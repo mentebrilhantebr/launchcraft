@@ -1,0 +1,215 @@
+// Schema do LaunchCraft MVP
+// Versão: 1.0.0 - Etapa 2
+// 8 entidades: Users, Plans, Projects, Conversations, Templates, Configurations, Feedbacks, History
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  // URLs configuradas em prisma7.config.ts (Prisma 7)
+}
+
+// ============================================
+// 1. PLANS - Planos de assinatura
+// ============================================
+model Plan {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @db.VarChar(100)
+  priceCents     Int      @map("price_cents") // em centavos (0 = gratuito)
+  stripePriceId  String?  @map("stripe_price_id") @db.VarChar(255)
+  features       Json     // lista de funcionalidades
+  maxProjects    Int?     @map("max_projects") // null = ilimitado
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  users User[]
+
+  @@map("plans")
+}
+
+// ============================================
+// 2. USERS - Usuários
+// ============================================
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  passwordHash  String   @map("password_hash") @db.VarChar(255)
+  name          String   @db.VarChar(255)
+  role          UserRole @default(USER)
+  planId        String?  @map("plan_id") @db.Uuid
+  emailVerified Boolean  @default(false) @map("email_verified")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  plan            Plan?           @relation(fields: [planId], references: [id], onDelete: SetNull)
+  projects        Project[]
+  conversations   Conversation[]
+  feedbacks       Feedback[]
+  history         History[]
+  configurations  Configuration[]
+  createdTemplates Template[]     @relation("TemplateCreator")
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+
+  @@map("user_role")
+}
+
+// ============================================
+// 3. PROJECTS - Projetos
+// ============================================
+model Project {
+  id           String        @id @default(uuid()) @db.Uuid
+  userId       String        @map("user_id") @db.Uuid
+  name         String        @db.VarChar(255)
+  niche        String        @db.VarChar(255)
+  status       ProjectStatus @default(DRAFT)
+  currentStage Int           @default(1) @map("current_stage") // 1-12
+  outputData   Json?         @map("output_data") // dados gerados (página, curso, etc)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  feedbacks     Feedback[]
+  history       History[]
+
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  PUBLISHED
+
+  @@map("project_status")
+}
+
+// ============================================
+// 4. CONVERSATIONS - Conversas
+// ============================================
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  stage     Int      // qual das 12 etapas
+  messages  Json     // array de {role, content, timestamp}
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("conversations")
+}
+
+// ============================================
+// 5. TEMPLATES - Templates
+// ============================================
+model Template {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  category  String   @db.VarChar(100) // ex: "página de vendas", "estrutura de curso"
+  niche     String?  @db.VarChar(255) // null = genérico
+  content   Json     // estrutura do template
+  isActive  Boolean  @default(true) @map("is_active")
+  createdBy String?  @map("created_by") @db.Uuid // admin que criou
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  creator User? @relation("TemplateCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@map("templates")
+}
+
+// ============================================
+// 6. CONFIGURATIONS - Configurações
+// ============================================
+model Configuration {
+  id          String            @id @default(uuid()) @db.Uuid
+  key         String            @unique @db.VarChar(255)
+  value       Json
+  scope       ConfigurationScope
+  userId      String?           @map("user_id") @db.Uuid // null = global
+  description String?           @db.Text
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("configurations")
+}
+
+enum ConfigurationScope {
+  GLOBAL
+  USER
+
+  @@map("configuration_scope")
+}
+
+// ============================================
+// 7. FEEDBACKS - Feedbacks
+// ============================================
+model Feedback {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  projectId  String?        @map("project_id") @db.Uuid
+  type       FeedbackType
+  message    String         @db.Text
+  status     FeedbackStatus @default(OPEN)
+  adminNotes String?        @map("admin_notes") @db.Text
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@map("feedbacks")
+}
+
+enum FeedbackType {
+  BUG
+  SUGGESTION
+  PRAISE
+  OTHER
+
+  @@map("feedback_type")
+}
+
+enum FeedbackStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+
+  @@map("feedback_status")
+}
+
+// ============================================
+// 8. HISTORY - Histórico
+// ============================================
+model History {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  projectId String?  @map("project_id") @db.Uuid
+  action    String   @db.VarChar(255) // ex: "project_created", "stage_completed"
+  metadata  Json?    // detalhes da ação
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Relacionamentos
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@map("history")
+}
