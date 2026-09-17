@@ -4,14 +4,17 @@ Módulo responsável por toda a camada de segurança e autenticação do LaunchC
 
 ## 📦 Stack
 
-- **Hash de Senhas**: bcrypt (10 rounds)
-- **JWT**: jsonwebtoken
-- **Tokens**: Access Token (15min) + Refresh Token (7 dias)
-- **Cookies**: httpOnly, secure (produção), sameSite
+* **Hash de Senhas**: bcrypt (10 rounds)
+
+* **JWT**: jsonwebtoken
+
+* **Tokens**: Access Token (15min) + Refresh Token (7 dias)
+
+* **Cookies**: httpOnly, secure (produção), sameSite
 
 ## 🔐 Componentes
 
-### 1. Hash de Senhas (`hash.ts`)
+### 1\. Hash de Senhas (`hash.ts`)
 
 Gerencia hash seguro de senhas com bcrypt.
 
@@ -32,13 +35,18 @@ if (!validation.isValid) {
 ```
 
 **Requisitos de senha:**
-- Mínimo 8 caracteres
-- Pelo menos 1 letra maiúscula
-- Pelo menos 1 letra minúscula
-- Pelo menos 1 número
-- Pelo menos 1 caractere especial
 
-### 2. JWT (`jwt.ts`)
+* Mínimo 8 caracteres
+
+* Pelo menos 1 letra maiúscula
+
+* Pelo menos 1 letra minúscula
+
+* Pelo menos 1 número
+
+* Pelo menos 1 caractere especial
+
+### 2\. JWT (`jwt.ts`)
 
 Gerencia geração e validação de tokens JWT.
 
@@ -63,10 +71,12 @@ const refreshValidation = verifyRefreshToken(tokens.refreshToken);
 ```
 
 **Duração dos tokens:**
-- Access Token: 15 minutos
-- Refresh Token: 7 dias
 
-### 3. Middleware de Autenticação (`auth-middleware.ts`)
+* Access Token: 15 minutos
+
+* Refresh Token: 7 dias
+
+### 3\. Middleware de Autenticação (`auth-middleware.ts`)
 
 Protege rotas da API.
 
@@ -101,7 +111,7 @@ export async function GET(request: NextRequest) {
 }
 ```
 
-### 4. Obter Usuário Atual (`get-current-user.ts`)
+### 4\. Obter Usuário Atual (`get-current-user.ts`)
 
 Obtém dados completos do usuário autenticado.
 
@@ -122,9 +132,11 @@ if (!canCreate) {
 ## 🌐 API Routes
 
 ### POST /api/auth/signup
+
 Cadastro de novo usuário.
 
 **Request:**
+
 ```json
 {
   "email": "usuario@exemplo.com",
@@ -134,6 +146,7 @@ Cadastro de novo usuário.
 ```
 
 **Response (201):**
+
 ```json
 {
   "message": "Cadastro realizado com sucesso",
@@ -149,9 +162,11 @@ Cadastro de novo usuário.
 ```
 
 ### POST /api/auth/login
+
 Login de usuário existente.
 
 **Request:**
+
 ```json
 {
   "email": "usuario@exemplo.com",
@@ -160,6 +175,7 @@ Login de usuário existente.
 ```
 
 **Response (200):**
+
 ```json
 {
   "message": "Login realizado com sucesso",
@@ -169,11 +185,13 @@ Login de usuário existente.
 ```
 
 ### POST /api/auth/refresh
+
 Renova access token usando refresh token do cookie.
 
 **Request:** (vazio, refresh token vem do cookie)
 
 **Response (200):**
+
 ```json
 {
   "message": "Token renovado com sucesso",
@@ -183,11 +201,13 @@ Renova access token usando refresh token do cookie.
 ```
 
 ### POST /api/auth/logout
+
 Remove refresh token e invalida sessão.
 
 **Request:** (vazio)
 
 **Response (200):**
+
 ```json
 {
   "message": "Logout realizado com sucesso"
@@ -195,14 +215,17 @@ Remove refresh token e invalida sessão.
 ```
 
 ### GET /api/auth/me
+
 Retorna dados do usuário autenticado (requer autenticação).
 
 **Headers:**
+
 ```
 Authorization: Bearer <accessToken>
 ```
 
 **Response (200):**
+
 ```json
 {
   "user": {
@@ -218,7 +241,8 @@ Authorization: Bearer <accessToken>
 
 ## 🔄 Fluxo de Autenticação
 
-### 1. Cadastro
+### 1\. Cadastro
+
 ```
 Cliente → POST /api/auth/signup
        → Hash da senha (bcrypt)
@@ -227,7 +251,8 @@ Cliente → POST /api/auth/signup
        ← Access token (JSON) + Refresh token (cookie)
 ```
 
-### 2. Login
+### 2\. Login
+
 ```
 Cliente → POST /api/auth/login
        → Verificar senha (bcrypt.compare)
@@ -235,7 +260,8 @@ Cliente → POST /api/auth/login
        ← Access token (JSON) + Refresh token (cookie)
 ```
 
-### 3. Acesso a Rotas Protegidas
+### 3\. Acesso a Rotas Protegidas
+
 ```
 Cliente → GET /api/... 
         → Header: Authorization: Bearer <accessToken>
@@ -244,7 +270,8 @@ Cliente → GET /api/...
         ← Resposta da rota
 ```
 
-### 4. Renovação de Token
+### 4\. Renovação de Token
+
 ```
 Cliente → POST /api/auth/refresh
         → Cookie: refreshToken
@@ -253,7 +280,8 @@ Cliente → POST /api/auth/refresh
         ← Novo access token + novo refresh token (rotation)
 ```
 
-### 5. Logout
+### 5\. Logout
+
 ```
 Cliente → POST /api/auth/logout
         → Remove cookie refreshToken
@@ -265,27 +293,42 @@ Cliente → POST /api/auth/logout
 ### Proteções Implementadas
 
 ✅ **Senhas**
-- Hash bcrypt com 10 rounds (salt automático)
-- Validação de força obrigatória
-- Nunca armazenadas em texto plano
+
+* Hash bcrypt com 10 rounds (salt automático)
+
+* Validação de força obrigatória
+
+* Nunca armazenadas em texto plano
 
 ✅ **JWT**
-- Tokens assinados (HMAC SHA256)
-- Secrets seguros (64 bytes aleatórios)
-- Expiração automática
-- Refresh token rotation
+
+* Tokens assinados (HMAC SHA256)
+
+* Secrets seguros (64 bytes aleatórios)
+
+* Expiração automática
+
+* Refresh token rotation
 
 ✅ **Cookies**
-- httpOnly (inacessível via JavaScript)
-- secure em produção (HTTPS only)
-- sameSite: lax (CSRF protection)
-- Path: / (válido para toda aplicação)
+
+* httpOnly (inacessível via JavaScript)
+
+* secure em produção (HTTPS only)
+
+* sameSite: lax (CSRF protection)
+
+* Path: / (válido para toda aplicação)
 
 ✅ **API**
-- Middleware de autenticação
-- Separação user/admin
-- Validação de entrada
-- Mensagens de erro genéricas (não revela detalhes)
+
+* Middleware de autenticação
+
+* Separação user/admin
+
+* Validação de entrada
+
+* Mensagens de erro genéricas (não revela detalhes)
 
 ### Variáveis de Ambiente
 
@@ -294,10 +337,13 @@ JWT_SECRET="<64-bytes-random-hex>"
 JWT_REFRESH_SECRET="<64-bytes-random-hex>"
 ```
 
-**⚠️ IMPORTANTE**: 
-- NUNCA commitar .env no Git
-- Gerar secrets únicos para cada ambiente
-- Usar secrets diferentes para dev/staging/prod
+**⚠️ IMPORTANTE**:
+
+* NUNCA commitar .env no Git
+
+* Gerar secrets únicos para cada ambiente
+
+* Usar secrets diferentes para dev/staging/prod
 
 ## 🧪 Testes
 
@@ -310,9 +356,13 @@ npx tsx src/lib/security/test-auth.ts
 ```
 
 Testes cobrem:
+
 1. Hash e verificação de senha
+
 2. Validação de força de senha
+
 3. Geração e validação de access token
+
 4. Geração e validação de refresh token
 
 ## 📝 Exemplo Completo
@@ -386,7 +436,10 @@ export async function GET(request: NextRequest) {
 
 ## 📚 Referências
 
-- [bcrypt - NPM](https://www.npmjs.com/package/bcrypt)
-- [jsonwebtoken - NPM](https://www.npmjs.com/package/jsonwebtoken)
-- [JWT.io](https://jwt.io/)
-- [OWASP Password Guidelines](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+* [bcrypt - NPM](https://www.npmjs.com/package/bcrypt)
+
+* [jsonwebtoken - NPM](https://www.npmjs.com/package/jsonwebtoken)
+
+* [JWT.io](https://jwt.io/)
+
+* [OWASP Password Guidelines](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
