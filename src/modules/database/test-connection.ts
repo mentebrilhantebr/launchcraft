@@ -44,12 +44,12 @@ async function testConnection() {
       'users',
     ];
 
-    const tableNames = tables.map(t => t.tablename);
-    const missingTables = expectedTables.filter(t => !tableNames.includes(t));
-    const extraTables = tableNames.filter(t => !expectedTables.includes(t) && !t.startsWith('_'));
+    const tableNames = tables.map((t: { tablename: string }) => t.tablename);
+    const missingTables = expectedTables.filter((t: string) => !tableNames.includes(t));
+    const extraTables = tableNames.filter((t: string) => !expectedTables.includes(t) && !t.startsWith('_'));
 
     console.log(`   Tabelas encontradas: ${tableNames.length}`);
-    tableNames.forEach(name => console.log(`   - ${name}`));
+    tableNames.forEach((name: string) => console.log(`   - ${name}`));
 
     if (missingTables.length > 0) {
       console.log('\n⚠️  Tabelas faltando:', missingTables);

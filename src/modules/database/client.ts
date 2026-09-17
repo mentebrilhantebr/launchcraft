@@ -2,12 +2,14 @@
  * Cliente Prisma - Singleton Pattern
  * 
  * Gerencia conexão com PostgreSQL via Prisma ORM
- * Compatível com PgBouncer (connection pooling)
+ * Usa driver adapter (Prisma 7 requirement)
  * 
  * @module database/client
  */
 
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 
 // Tipos globais para TypeScript
 declare global {
@@ -16,25 +18,42 @@ declare global {
 }
 
 /**
- * Instância única do Prisma Client
+ * Cria instância do Prisma Client com adapter
+ */
+function createPrismaClient() {
+  // Prisma 7 requer driver adapter
+  const connectionString = process.env.DATABASE_URL;
+  
+  if (!connectionString) {
+    // Durante build sem DATABASE_URL, retornar client sem adapter
+    // (apenas para compilação, não será usado em runtime)
+    console.warn('⚠️ DATABASE_URL não configurado - Prisma Client em modo de build');
+    return new PrismaClient({
+      log: ['error'],
+    }) as any;
+  }
+
+  // Criar pool de conexões do PostgreSQL
+  const pool = new Pool({ connectionString });
+  
+  // Criar adapter
+  const adapter = new PrismaPg(pool);
+
+  // Criar Prisma Client com adapter
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === 'development' 
+      ? ['query', 'error', 'warn'] 
+      : ['error'],
+  });
+}
+
+/**
+ * Instância única do Prisma Client (singleton)
  * Em desenvolvimento, reutiliza a instância global para evitar múltiplas conexões
  * Em produção, cria nova instância a cada deploy
- * 
- * NOTA: Para usar PgBouncer em produção, será necessário instanciar com driver adapter:
- * 
- * ```typescript
- * import { PrismaPg } from '@prisma/adapter-pg';
- * const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
- * const prisma = new PrismaClient({ adapter });
- * ```
- * 
- * Isso será implementado quando deployar em produção (pós-MVP).
  */
-export const prisma = global.prisma || new PrismaClient({
-  log: process.env.NODE_ENV === 'development' 
-    ? ['query', 'error', 'warn'] 
-    : ['error'],
-});
+export const prisma = global.prisma || createPrismaClient();
 
 // Em desenvolvimento, armazena na variável global para Hot Module Replacement
 if (process.env.NODE_ENV !== 'production') {
