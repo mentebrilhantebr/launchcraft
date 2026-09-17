@@ -9,8 +9,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
-    // Suporte a PgBouncer: directUrl para migrations
-    directUrl: process.env["DIRECT_DATABASE_URL"],
+    // Em Prisma 7, usa-se apenas 'url' para migrations/CLI
+    // Para pooling em runtime, usa-se driver adapter no PrismaClient
+    url: process.env["DIRECT_DATABASE_URL"] || process.env["DATABASE_URL"],
   },
 });

@@ -19,6 +19,16 @@ declare global {
  * Instância única do Prisma Client
  * Em desenvolvimento, reutiliza a instância global para evitar múltiplas conexões
  * Em produção, cria nova instância a cada deploy
+ * 
+ * NOTA: Para usar PgBouncer em produção, será necessário instanciar com driver adapter:
+ * 
+ * ```typescript
+ * import { PrismaPg } from '@prisma/adapter-pg';
+ * const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+ * const prisma = new PrismaClient({ adapter });
+ * ```
+ * 
+ * Isso será implementado quando deployar em produção (pós-MVP).
  */
 export const prisma = global.prisma || new PrismaClient({
   log: process.env.NODE_ENV === 'development' 
