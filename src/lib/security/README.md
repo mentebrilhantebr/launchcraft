@@ -369,11 +369,23 @@ Testes cobrem:
 
 ### Cliente (Frontend)
 
+> ⚠️ **Segurança — armazenamento do access token:** o access token
+> **NUNCA** deve ser guardado em `localStorage`/`sessionStorage` (fica exposto
+> a XSS). Ele deve viver **apenas em memória** (variável no runtime da SPA / um
+> provider/estado do React). A persistência da sessão entre reloads é feita
+> pelo **refresh token em cookie httpOnly** (inacessível ao JavaScript): ao
+> recarregar a página, chame `/api/auth/refresh` para obter um novo access
+> token em memória.
+
 ```typescript
+// Access token mantido APENAS em memória (nunca em localStorage/sessionStorage).
+let accessToken: string | null = null;
+
 // 1. Cadastro
 const signupResponse = await fetch('/api/auth/signup', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
+  credentials: 'include', // recebe o refresh token via cookie httpOnly
   body: JSON.stringify({
     email: 'usuario@exemplo.com',
     password: 'MinhaSenh@123',
@@ -381,8 +393,8 @@ const signupResponse = await fetch('/api/auth/signup', {
   }),
 });
 
-const { accessToken, user } = await signupResponse.json();
-localStorage.setItem('accessToken', accessToken);
+const { accessToken: token, user } = await signupResponse.json();
+accessToken = token; // guardado em memória
 
 // 2. Fazer requisições autenticadas
 const projectsResponse = await fetch('/api/projects', {
@@ -391,17 +403,17 @@ const projectsResponse = await fetch('/api/projects', {
   },
 });
 
-// 3. Renovar token quando expirar
-if (response.status === 401) {
+// 3. Renovar token quando expirar (ou ao recarregar a página)
+if (projectsResponse.status === 401) {
   const refreshResponse = await fetch('/api/auth/refresh', {
     method: 'POST',
-    credentials: 'include', // Envia cookies
+    credentials: 'include', // envia o refresh token (cookie httpOnly)
   });
-  
+
   const { accessToken: newToken } = await refreshResponse.json();
-  localStorage.setItem('accessToken', newToken);
-  
-  // Tentar novamente com novo token
+  accessToken = newToken; // atualizado em memória
+
+  // Tentar novamente com o novo token
 }
 
 // 4. Logout
@@ -409,7 +421,7 @@ await fetch('/api/auth/logout', {
   method: 'POST',
   credentials: 'include',
 });
-localStorage.removeItem('accessToken');
+accessToken = null; // limpa a memória; o cookie httpOnly é removido pelo servidor
 ```
 
 ### Servidor (API Route)
