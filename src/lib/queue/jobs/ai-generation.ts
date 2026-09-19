@@ -62,3 +62,47 @@ export async function addAIGenerationJob(
     removeOnFail: 500,
   });
 }
+
+/**
+ * Serializable status of an AI generation job, returned to the client for
+ * polling (Etapa 6). Real-time progress via SSE is a later step (Etapa 7);
+ * for now the client polls this shape through GET on the generate route.
+ */
+export interface AIGenerationJobStatus {
+  jobId: string;
+  /** BullMQ state: 'waiting' | 'active' | 'completed' | 'failed' | 'delayed' | 'paused' | 'unknown'. */
+  state: string;
+  /** Progress reported by the worker (0-100), when available. */
+  progress: number;
+  /** Generated content, present only when the job completed successfully. */
+  result: string | null;
+  /** Failure reason, present only when the job failed. */
+  failedReason: string | null;
+}
+
+/**
+ * Fetches the current status of an AI generation job for polling.
+ * Returns `null` when no job exists with the given id.
+ */
+export async function getAIGenerationJob(
+  jobId: string
+): Promise<AIGenerationJobStatus | null> {
+  const job = await getQueue().getJob(jobId);
+  if (!job) {
+    return null;
+  }
+
+  const state = await job.getState();
+  const progressValue =
+    typeof job.progress === 'number' ? job.progress : 0;
+
+  const returnValue = job.returnvalue as { content?: string } | undefined;
+
+  return {
+    jobId: job.id ?? jobId,
+    state,
+    progress: progressValue,
+    result: returnValue?.content ?? null,
+    failedReason: job.failedReason ?? null,
+  };
+}

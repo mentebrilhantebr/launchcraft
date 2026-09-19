@@ -53,10 +53,12 @@ export {
   readFlowState,
   mergeDecisions,
   recordStageEntry,
+  appendGeneration,
   type StageMeta,
   type ProjectDecisions,
   type ProjectFlowState,
   type StageHistoryEntry,
+  type GenerationResult,
 } from './flow';
 
 // Context

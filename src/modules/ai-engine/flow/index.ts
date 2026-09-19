@@ -30,7 +30,9 @@ export {
   readFlowState,
   mergeDecisions,
   recordStageEntry,
+  appendGeneration,
   type ProjectDecisions,
   type ProjectFlowState,
   type StageHistoryEntry,
+  type GenerationResult,
 } from './project-state';

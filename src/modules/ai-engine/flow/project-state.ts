@@ -31,18 +31,55 @@ export interface StageHistoryEntry {
 }
 
 /**
+ * A piece of content produced by the AI generation queue (Etapa 6).
+ *
+ * Generation of heavy content (sales page, course structure, etc.) never runs
+ * inside the synchronous HTTP request — it is processed by the BullMQ worker
+ * and the result is persisted back here, inside Project.outputData, so it is
+ * recovered exactly where the user left off (Doc 08: "Recuperação de Projetos").
+ */
+export interface GenerationResult {
+  /** BullMQ job id that produced this result (for traceability / polling). */
+  jobId?: string;
+  /** Kind of generation (matches AIGenerationKind of the queue). */
+  kind: string;
+  /** Stage the generation belongs to. */
+  stage: number;
+  /** The generated content itself. */
+  content: string;
+  /** ISO timestamp of when the content was generated. */
+  createdAt: string;
+}
+
+/**
  * The full flow state persisted in Project.outputData.
  */
 export interface ProjectFlowState {
   decisions: ProjectDecisions;
   stageHistory: StageHistoryEntry[];
+  /** Content produced by the generation queue (Etapa 6). */
+  generations: GenerationResult[];
 }
 
 /**
  * Returns an empty flow state.
  */
 export function emptyFlowState(): ProjectFlowState {
-  return { decisions: {}, stageHistory: [] };
+  return { decisions: {}, stageHistory: [], generations: [] };
+}
+
+/**
+ * Type guard for a single persisted GenerationResult coming from JSONB.
+ */
+function isGenerationResult(value: unknown): value is GenerationResult {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.kind === 'string' &&
+    typeof record.stage === 'number' &&
+    typeof record.content === 'string' &&
+    typeof record.createdAt === 'string'
+  );
 }
 
 /**
@@ -73,7 +110,11 @@ export function readFlowState(outputData: unknown): ProjectFlowState {
       )
     : [];
 
-  return { decisions, stageHistory };
+  const generations = Array.isArray(data.generations)
+    ? (data.generations as unknown[]).filter(isGenerationResult)
+    : [];
+
+  return { decisions, stageHistory, generations };
 }
 
 /**
@@ -114,5 +155,22 @@ export function recordStageEntry(
       ...state.stageHistory,
       { stage, enteredAt: new Date().toISOString() },
     ],
+  };
+}
+
+/**
+ * Appends a generation result to the flow state, returning a NEW state (does
+ * not mutate the input). Called by the BullMQ worker after content is produced
+ * so results are persisted inside Project.outputData alongside decisions and
+ * stage history. Because mergeDecisions/recordStageEntry spread `...state`, the
+ * generations array survives subsequent stage navigation writes.
+ */
+export function appendGeneration(
+  state: ProjectFlowState,
+  result: GenerationResult
+): ProjectFlowState {
+  return {
+    ...state,
+    generations: [...state.generations, result],
   };
 }
