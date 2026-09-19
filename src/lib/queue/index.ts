@@ -18,3 +18,4 @@ export {
   type AIGenerationJobStatus,
 } from './jobs/ai-generation';
 export { createAIGenerationWorker } from './workers/ai-generation-worker';
+export { createQueueEvents } from './queue-events';

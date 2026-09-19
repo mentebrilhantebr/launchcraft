@@ -46,6 +46,29 @@ interface ChatMessage {
   timestamp?: string;
 }
 
+// ── Geração de conteúdo (Etapa 7) ────────────────────────────────────────────
+
+const GEN_KINDS = [
+  { value: 'sales_page',        label: 'Página de Vendas' },
+  { value: 'course_structure',  label: 'Estrutura do Curso' },
+  { value: 'module_content',    label: 'Conteúdo de Módulo' },
+  { value: 'launch_plan',       label: 'Plano de Lançamento' },
+] as const;
+
+type GenKind = (typeof GEN_KINDS)[number]['value'];
+
+/**
+ * Rótulo textual do progresso — exemplos literais do Doc 02, seção 9:
+ * "Enquanto trabalha, a IA informa o progresso."
+ */
+function progressLabel(p: number): string {
+  if (p <= 10) return 'Analisando sua ideia...';
+  if (p <= 30) return 'Organizando as páginas...';
+  if (p <= 80) return 'Criando a estrutura do negócio...';
+  if (p < 100) return 'Finalizando seu projeto...';
+  return 'Concluído!';
+}
+
 export default function ProjectPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -59,6 +82,15 @@ export default function ProjectPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const streamingRef = useRef('');
+
+  // ── Estado da geração assíncrona via fila (Etapa 7) ──────────────────────
+  const [genKind, setGenKind] = useState<GenKind>('sales_page');
+  const [genPrompt, setGenPrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState(0);
+  const [genStatusMsg, setGenStatusMsg] = useState('');
+  const [genContent, setGenContent] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const loadStage = useCallback(async () => {
     const res = await authFetch(`/api/projects/${projectId}/stage`);
@@ -200,6 +232,102 @@ export default function ProjectPage() {
     }
   }
 
+  // ── Geração assíncrona com progresso SSE (Etapa 7) ──────────────────────
+  async function handleGenerate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!genPrompt.trim() || generating) return;
+    setGenError(null);
+    setGenContent(null);
+    setGenProgress(0);
+    setGenStatusMsg('Iniciando...');
+    setGenerating(true);
+
+    try {
+      // Garantir access token válido antes de fazer fetch autenticado.
+      if (!getAccessToken()) await refresh();
+      const token = getAccessToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      // 1. Enfileirar o job de geração — POST retorna 202 + jobId.
+      const postRes = await fetch(`/api/projects/${projectId}/generate`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          kind: genKind,
+          prompt: genPrompt.trim(),
+          stage: stageData?.currentStage ?? 1,
+        }),
+      });
+
+      if (!postRes.ok) {
+        const errData = await postRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(errData?.error || 'Falha ao enfileirar a geração.');
+      }
+
+      const { jobId } = await postRes.json() as { jobId: string };
+
+      // 2. Abrir stream SSE de progresso (fetch + ReadableStream — mesmo padrão do /api/chat).
+      const sseRes = await fetch(
+        `/api/projects/${projectId}/generate/progress?jobId=${jobId}`,
+        { headers, credentials: 'include' }
+      );
+
+      if (!sseRes.ok || !sseRes.body) {
+        throw new Error('Falha ao abrir stream de progresso.');
+      }
+
+      const reader = sseRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+
+        for (const evt of events) {
+          const line = evt.trim();
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(payload) as {
+              type: string;
+              progress?: number;
+              message?: string;
+              content?: string;
+              error?: string;
+            };
+            if (parsed.type === 'progress') {
+              setGenProgress(parsed.progress ?? 0);
+              setGenStatusMsg(parsed.message ?? progressLabel(parsed.progress ?? 0));
+            } else if (parsed.type === 'completed') {
+              setGenProgress(100);
+              setGenStatusMsg('Concluído!');
+              setGenContent(parsed.content ?? '');
+            } else if (parsed.type === 'error') {
+              setGenError(parsed.error || 'Erro na geração.');
+            }
+          } catch {
+            // Ignora payloads não-JSON.
+          }
+        }
+      }
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Erro inesperado.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (!ready) {
     return <main style={{ padding: 16 }}>Carregando...</main>;
   }
@@ -307,6 +435,86 @@ export default function ProjectPage() {
         >
           {JSON.stringify(stageData?.flowState ?? {}, null, 2)}
         </pre>
+      </section>
+
+      {/* ── Geração de conteúdo com SSE (Etapa 7) ─────────────────────────────
+          Doc 02, seção 18: "O usuário nunca deve ficar sem saber o que está acontecendo."
+          Doc 08: "A interface deve atualizar automaticamente. Mostrar progresso." */}
+      <section style={{ marginTop: 24 }}>
+        <h2>Geração de conteúdo (tempo real)</h2>
+        <form
+          onSubmit={handleGenerate}
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        >
+          <label>
+            Tipo de conteúdo:
+            <select
+              value={genKind}
+              onChange={(e) => setGenKind(e.target.value as GenKind)}
+              disabled={generating}
+              style={{ marginLeft: 8 }}
+            >
+              {GEN_KINDS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <textarea
+            value={genPrompt}
+            onChange={(e) => setGenPrompt(e.target.value)}
+            placeholder="Descreva o conteúdo que deseja gerar..."
+            rows={4}
+            style={{ width: '100%' }}
+            disabled={generating}
+          />
+
+          <button
+            type="submit"
+            disabled={generating || !genPrompt.trim()}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {generating ? 'Gerando...' : 'Gerar conteúdo'}
+          </button>
+        </form>
+
+        {/* Barra de progresso em tempo real — Doc 02, seção 9 */}
+        {(generating || genProgress > 0) && genContent === null && (
+          <div style={{ marginTop: 12 }}>
+            <progress
+              value={genProgress}
+              max={100}
+              style={{ width: '100%' }}
+            />
+            <p style={{ margin: '4px 0', fontSize: 14 }}>
+              {genStatusMsg || progressLabel(genProgress)}
+            </p>
+          </div>
+        )}
+
+        {genError && (
+          <p style={{ color: 'red', marginTop: 8 }}>{genError}</p>
+        )}
+
+        {genContent !== null && (
+          <div style={{ marginTop: 12 }}>
+            <strong>Conteúdo gerado:</strong>
+            <pre
+              style={{
+                border: '1px solid #ccc',
+                padding: 8,
+                overflowX: 'auto',
+                whiteSpace: 'pre-wrap',
+                fontSize: 13,
+                marginTop: 4,
+              }}
+            >
+              {genContent}
+            </pre>
+          </div>
+        )}
       </section>
     </main>
   );
