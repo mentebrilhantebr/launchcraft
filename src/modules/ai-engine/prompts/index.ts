@@ -10,5 +10,6 @@ export {
   TOTAL_STAGES,
   getStagePrompt,
   type StagePrompt,
+  type StageKind,
 } from './stage-prompts';
 export { buildSystemPrompt, buildMessages } from './prompt-builder';

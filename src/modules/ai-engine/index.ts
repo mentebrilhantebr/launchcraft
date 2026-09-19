@@ -34,7 +34,30 @@ export {
   buildSystemPrompt,
   buildMessages,
   type StagePrompt,
+  type StageKind,
 } from './prompts';
+
+// Flow (12-stage construction logic - Doc 04)
+export {
+  FLOW_STAGES,
+  FIRST_STAGE,
+  LAST_STAGE,
+  isValidStage,
+  getStageMeta,
+  canAdvance,
+  canGoBack,
+  nextStage,
+  previousStage,
+  isSequentialAdvance,
+  emptyFlowState,
+  readFlowState,
+  mergeDecisions,
+  recordStageEntry,
+  type StageMeta,
+  type ProjectDecisions,
+  type ProjectFlowState,
+  type StageHistoryEntry,
+} from './flow';
 
 // Context
 export {

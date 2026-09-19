@@ -18,13 +18,18 @@ const instances: Partial<Record<ProviderName, LLMProvider>> = {};
 
 /**
  * Normalizes an arbitrary string into a known provider name.
+ *
+ * Decisão do usuário (Etapa 5): usar SOMENTE a Anthropic (Claude) como
+ * provedor ativo. Por isso o padrão para valores ausentes/desconhecidos é
+ * 'anthropic'. O código do OpenAIProvider é mantido intacto para uma eventual
+ * reativação futura como fallback.
  */
 function normalizeProviderName(name?: string): ProviderName {
   const normalized = (name ?? '').trim().toLowerCase();
   if (normalized === 'anthropic') return 'anthropic';
   if (normalized === 'openai') return 'openai';
-  // Default to OpenAI when unspecified or unknown.
-  return 'openai';
+  // Default to Anthropic when unspecified or unknown.
+  return 'anthropic';
 }
 
 /**
@@ -44,15 +49,23 @@ export function getProvider(name?: string): LLMProvider {
 }
 
 /**
- * Returns the primary provider (LLM_PRIMARY_PROVIDER, default openai).
+ * Returns the primary provider (LLM_PRIMARY_PROVIDER, default anthropic).
  */
 export function getPrimaryProvider(): LLMProvider {
-  return getProvider(process.env.LLM_PRIMARY_PROVIDER ?? 'openai');
+  return getProvider(process.env.LLM_PRIMARY_PROVIDER ?? 'anthropic');
 }
 
 /**
- * Returns the fallback provider (LLM_FALLBACK_PROVIDER, default anthropic).
+ * Returns the fallback provider, or null when none is configured.
+ *
+ * Decisão do usuário (Etapa 5): por padrão NÃO há fallback ativo — apenas a
+ * Anthropic está em uso. Um fallback só é usado se LLM_FALLBACK_PROVIDER estiver
+ * explicitamente definido no ambiente. Retorna null caso contrário.
  */
-export function getFallbackProvider(): LLMProvider {
-  return getProvider(process.env.LLM_FALLBACK_PROVIDER ?? 'anthropic');
+export function getFallbackProvider(): LLMProvider | null {
+  const configured = (process.env.LLM_FALLBACK_PROVIDER ?? '').trim();
+  if (!configured) {
+    return null;
+  }
+  return getProvider(configured);
 }
