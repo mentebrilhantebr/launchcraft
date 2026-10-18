@@ -5,7 +5,7 @@
  * etapas com a atual destacada, chat com streaming SSE, botões avançar/voltar
  * e visualização das decisões + histórico de etapas.
  *
- * UI mínima funcional (Etapa 5). Visual completo será feito na Etapa 9.
+ * Lógica das Etapas 5–7; visual aplicado na Etapa 9 (Tailwind).
  */
 
 'use client';
@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { authFetch, getAccessToken, refresh } from '@/lib/client/auth-client';
+import Brand from '@/components/Brand';
+import ThemeToggle from '@/components/ThemeToggle';
 
 interface StageMeta {
   stage: number;
@@ -329,7 +331,11 @@ export default function ProjectPage() {
   }
 
   if (!ready) {
-    return <main style={{ padding: 16 }}>Carregando...</main>;
+    return (
+      <main className="flex min-h-screen items-center justify-center text-muted">
+        <span className="animate-soft-pulse">Carregando...</span>
+      </main>
+    );
   }
 
   const current = stageData?.currentStage ?? 1;
@@ -337,185 +343,241 @@ export default function ProjectPage() {
   const meta = stageData?.stageMeta;
 
   return (
-    <main style={{ maxWidth: 760, margin: '24px auto', padding: 16 }}>
-      <button type="button" onClick={() => router.push('/app')}>
-        ← Voltar aos projetos
-      </button>
-      <h1>{projectName}</h1>
-
-      {/* Indicador de etapa */}
-      <section style={{ marginTop: 12 }}>
-        <strong>
-          Etapa {current} de {total}
-          {meta ? ` — ${meta.title}` : ''}
-          {meta?.kind === 'internal' ? ' (interna)' : ''}
-        </strong>
-        <ol style={{ marginTop: 8 }}>
-          {(stageData?.allStages ?? []).map((s) => (
-            <li
-              key={s.stage}
-              style={{
-                fontWeight: s.stage === current ? 'bold' : 'normal',
-              }}
-            >
-              {s.stage}. {s.title}
-              {s.kind === 'internal' ? ' (interna)' : ''}
-              {s.stage === current ? '  ← atual' : ''}
-            </li>
-          ))}
-        </ol>
-        <div style={{ display: 'flex', gap: 8 }}>
+    <div className="min-h-screen">
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
-            onClick={() => handleStageAction('back')}
-            disabled={!stageData?.canGoBack}
+            onClick={() => router.push('/app')}
+            className="btn-ghost shrink-0"
           >
-            ◀ Etapa anterior
+            ← Voltar aos projetos
           </button>
-          <button
-            type="button"
-            onClick={() => handleStageAction('advance')}
-            disabled={!stageData?.canAdvance}
-          >
-            Próxima etapa ▶
-          </button>
+          <h1 className="truncate text-lg font-semibold">{projectName}</h1>
         </div>
-      </section>
+        <div className="flex items-center gap-3">
+          <Brand className="hidden sm:inline-flex" />
+          <ThemeToggle />
+        </div>
+      </header>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <main className="mx-auto grid max-w-6xl gap-6 px-4 pb-10 lg:grid-cols-[minmax(0,1fr)_340px]">
+        {/* Chat — Doc 02, seção 18: "O chat é sempre o centro da experiência." */}
+        <section className="glass flex min-h-[70vh] flex-col rounded-2xl">
+          <div className="border-b border-border px-5 py-3 text-sm text-muted">
+            Etapa {current} de {total}
+            {meta ? ` — ${meta.title}` : ''}
+            {meta?.kind === 'internal' ? ' (interna)' : ''}
+          </div>
 
-      {/* Chat */}
-      <section style={{ marginTop: 24 }}>
-        <h2>Conversa</h2>
-        <div
-          style={{
-            border: '1px solid #ccc',
-            padding: 8,
-            minHeight: 160,
-            maxHeight: 360,
-            overflowY: 'auto',
-          }}
-        >
-          {messages.length === 0 ? (
-            <p>Descreva sua ideia e nós construiremos seu negócio digital.</p>
-          ) : (
-            messages.map((m, i) => (
-              <p key={i}>
-                <strong>{m.role === 'user' ? 'Você' : 'IA'}:</strong>{' '}
-                {m.content}
+          <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4 lg:max-h-[60vh]">
+            {messages.length === 0 ? (
+              <p className="mt-10 text-center text-muted">
+                Descreva sua ideia e nós construiremos seu negócio digital.
               </p>
-            ))
-          )}
-        </div>
-        <form onSubmit={handleSend} style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Digite sua mensagem..."
-            style={{ flex: 1 }}
-            disabled={streaming}
-          />
-          <button type="submit" disabled={streaming || !input.trim()}>
-            {streaming ? 'Gerando...' : 'Enviar'}
-          </button>
-        </form>
-      </section>
+            ) : (
+              messages.map((m, i) => (
+                <div
+                  key={i}
+                  className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
+                >
+                  <div
+                    className={
+                      m.role === 'user'
+                        ? 'max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-white'
+                        : 'max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md border border-border bg-surface px-4 py-2.5'
+                    }
+                  >
+                    <span className="mb-0.5 block text-xs opacity-70">
+                      {m.role === 'user' ? 'Você' : 'IA'}
+                    </span>
+                    {m.content ? (
+                      m.content
+                    ) : (
+                      <span className="animate-soft-pulse">…</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-      {/* Estado do fluxo (decisões + histórico) */}
-      <section style={{ marginTop: 24 }}>
-        <h2>Estado do projeto (decisões registradas)</h2>
-        <pre
-          style={{
-            border: '1px solid #ccc',
-            padding: 8,
-            overflowX: 'auto',
-            fontSize: 12,
-          }}
-        >
-          {JSON.stringify(stageData?.flowState ?? {}, null, 2)}
-        </pre>
-      </section>
-
-      {/* ── Geração de conteúdo com SSE (Etapa 7) ─────────────────────────────
-          Doc 02, seção 18: "O usuário nunca deve ficar sem saber o que está acontecendo."
-          Doc 08: "A interface deve atualizar automaticamente. Mostrar progresso." */}
-      <section style={{ marginTop: 24 }}>
-        <h2>Geração de conteúdo (tempo real)</h2>
-        <form
-          onSubmit={handleGenerate}
-          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-        >
-          <label>
-            Tipo de conteúdo:
-            <select
-              value={genKind}
-              onChange={(e) => setGenKind(e.target.value as GenKind)}
-              disabled={generating}
-              style={{ marginLeft: 8 }}
-            >
-              {GEN_KINDS.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <textarea
-            value={genPrompt}
-            onChange={(e) => setGenPrompt(e.target.value)}
-            placeholder="Descreva o conteúdo que deseja gerar..."
-            rows={4}
-            style={{ width: '100%' }}
-            disabled={generating}
-          />
-
-          <button
-            type="submit"
-            disabled={generating || !genPrompt.trim()}
-            style={{ alignSelf: 'flex-start' }}
-          >
-            {generating ? 'Gerando...' : 'Gerar conteúdo'}
-          </button>
-        </form>
-
-        {/* Barra de progresso em tempo real — Doc 02, seção 9 */}
-        {(generating || genProgress > 0) && genContent === null && (
-          <div style={{ marginTop: 12 }}>
-            <progress
-              value={genProgress}
-              max={100}
-              style={{ width: '100%' }}
-            />
-            <p style={{ margin: '4px 0', fontSize: 14 }}>
-              {genStatusMsg || progressLabel(genProgress)}
+          {error && (
+            <p className="mx-5 mb-2 rounded-xl bg-danger/10 px-4 py-2 text-sm text-danger">
+              {error}
             </p>
-          </div>
-        )}
+          )}
 
-        {genError && (
-          <p style={{ color: 'red', marginTop: 8 }}>{genError}</p>
-        )}
-
-        {genContent !== null && (
-          <div style={{ marginTop: 12 }}>
-            <strong>Conteúdo gerado:</strong>
-            <pre
-              style={{
-                border: '1px solid #ccc',
-                padding: 8,
-                overflowX: 'auto',
-                whiteSpace: 'pre-wrap',
-                fontSize: 13,
-                marginTop: 4,
-              }}
+          <form onSubmit={handleSend} className="flex gap-2 border-t border-border p-4">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Digite sua mensagem..."
+              className="field flex-1 rounded-full"
+              disabled={streaming}
+            />
+            <button
+              type="submit"
+              disabled={streaming || !input.trim()}
+              className="btn-primary rounded-full"
             >
-              {genContent}
-            </pre>
-          </div>
-        )}
-      </section>
-    </main>
+              {streaming ? 'Gerando...' : 'Enviar'}
+            </button>
+          </form>
+        </section>
+
+        {/* Painel lateral — Doc 02: "Esse painel mostra o negócio nascendo." */}
+        <aside className="space-y-6">
+          {/* Barra de progresso por etapas — "Ela deve mostrar etapas." */}
+          <section className="glass rounded-2xl p-5">
+            <h2 className="mb-3 text-sm font-medium text-muted">Progresso</h2>
+            <ol className="space-y-1.5">
+              {(stageData?.allStages ?? []).map((s) => {
+                const done = s.stage < current;
+                const isCurrent = s.stage === current;
+                return (
+                  <li
+                    key={s.stage}
+                    className={
+                      isCurrent
+                        ? 'flex items-center gap-2 rounded-lg bg-primary-soft px-2 py-1 text-sm font-semibold'
+                        : done
+                          ? 'flex items-center gap-2 px-2 py-1 text-sm'
+                          : 'flex items-center gap-2 px-2 py-1 text-sm text-muted'
+                    }
+                  >
+                    <span
+                      className={
+                        done
+                          ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-white'
+                          : isCurrent
+                            ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary text-[10px]'
+                            : 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-[10px]'
+                      }
+                    >
+                      {done ? '✔' : s.stage}
+                    </span>
+                    <span className="truncate">
+                      {s.title}
+                      {s.kind === 'internal' ? ' (interna)' : ''}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleStageAction('back')}
+                disabled={!stageData?.canGoBack}
+                className="btn-ghost flex-1 text-sm"
+              >
+                ◀ Etapa anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStageAction('advance')}
+                disabled={!stageData?.canAdvance}
+                className="btn-primary flex-1 text-sm"
+              >
+                Próxima etapa ▶
+              </button>
+            </div>
+          </section>
+
+          {/* Estado do fluxo (decisões + histórico) */}
+          <section className="glass rounded-2xl p-5">
+            <details>
+              <summary className="cursor-pointer text-sm font-medium text-muted">
+                Estado do projeto (decisões registradas)
+              </summary>
+              <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-surface p-3 text-xs">
+                {JSON.stringify(stageData?.flowState ?? {}, null, 2)}
+              </pre>
+            </details>
+          </section>
+
+          {/* ── Geração de conteúdo com SSE (Etapa 7) ─────────────────────────
+              Doc 02, seção 18: "O usuário nunca deve ficar sem saber o que está acontecendo."
+              Doc 08: "A interface deve atualizar automaticamente. Mostrar progresso." */}
+          <section className="glass rounded-2xl p-5">
+            <h2 className="mb-3 text-sm font-medium text-muted">
+              Geração de conteúdo (tempo real)
+            </h2>
+            <form onSubmit={handleGenerate} className="flex flex-col gap-3">
+              <label className="block text-sm text-muted">
+                Tipo de conteúdo:
+                <select
+                  value={genKind}
+                  onChange={(e) => setGenKind(e.target.value as GenKind)}
+                  disabled={generating}
+                  className="field mt-1"
+                >
+                  {GEN_KINDS.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <textarea
+                value={genPrompt}
+                onChange={(e) => setGenPrompt(e.target.value)}
+                placeholder="Descreva o conteúdo que deseja gerar..."
+                rows={4}
+                className="field resize-y"
+                disabled={generating}
+              />
+
+              <button
+                type="submit"
+                disabled={generating || !genPrompt.trim()}
+                className="btn-primary self-start text-sm"
+              >
+                {generating ? 'Gerando...' : 'Gerar conteúdo'}
+              </button>
+            </form>
+
+            {/* Barra de progresso em tempo real — Doc 02, seção 9 */}
+            {(generating || genProgress > 0) && genContent === null && (
+              <div className="mt-4">
+                <div
+                  className="h-2 w-full overflow-hidden rounded-full bg-surface"
+                  role="progressbar"
+                  aria-valuenow={genProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-500"
+                    style={{ width: `${genProgress}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-sm text-muted">
+                  {genStatusMsg || progressLabel(genProgress)}
+                </p>
+              </div>
+            )}
+
+            {genError && (
+              <p className="mt-3 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">
+                {genError}
+              </p>
+            )}
+
+            {genContent !== null && (
+              <div className="mt-4">
+                <strong className="text-sm">Conteúdo gerado:</strong>
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-3 text-xs">
+                  {genContent}
+                </pre>
+              </div>
+            )}
+          </section>
+        </aside>
+      </main>
+    </div>
   );
 }

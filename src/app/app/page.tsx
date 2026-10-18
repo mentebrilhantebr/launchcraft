@@ -1,7 +1,7 @@
 /**
  * Dashboard — lista e criação de projetos
  *
- * UI mínima funcional (Etapa 5). Visual completo será feito na Etapa 9.
+ * Lógica da Etapa 5; visual aplicado na Etapa 9 (Tailwind).
  */
 
 'use client';
@@ -9,6 +9,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authFetch, logout, refresh } from '@/lib/client/auth-client';
+import Brand from '@/components/Brand';
+import ThemeToggle from '@/components/ThemeToggle';
 
 interface ProjectListItem {
   id: string;
@@ -79,69 +81,95 @@ export default function DashboardPage() {
   }
 
   if (!ready) {
-    return <main style={{ padding: 16 }}>Carregando...</main>;
+    return (
+      <main className="flex min-h-screen items-center justify-center text-muted">
+        <span className="animate-soft-pulse">Carregando...</span>
+      </main>
+    );
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: '24px auto', padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <h1>Meus projetos</h1>
-        <button type="button" onClick={handleLogout}>
-          Sair
-        </button>
-      </div>
-
-      <section style={{ marginTop: 16 }}>
-        <h2>Novo projeto</h2>
-        <form onSubmit={handleCreate} style={{ display: 'grid', gap: 8 }}>
-          <label>
-            Nome
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              style={{ display: 'block', width: '100%' }}
-            />
-          </label>
-          <label>
-            Nicho
-            <input
-              type="text"
-              value={niche}
-              onChange={(e) => setNiche(e.target.value)}
-              required
-              style={{ display: 'block', width: '100%' }}
-            />
-          </label>
-          <button type="submit" disabled={creating}>
-            {creating ? 'Criando...' : 'Criar projeto'}
+    <div className="min-h-screen">
+      <header className="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
+        <Brand />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button type="button" onClick={handleLogout} className="btn-ghost">
+            Sair
           </button>
-        </form>
-      </section>
+        </div>
+      </header>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <main className="mx-auto max-w-3xl space-y-6 px-4 pb-12">
+        <h1 className="text-2xl font-semibold tracking-tight">Meus projetos</h1>
 
-      <section style={{ marginTop: 24 }}>
-        <h2>Projetos existentes</h2>
-        {projects.length === 0 ? (
-          <p>Nenhum projeto ainda.</p>
-        ) : (
-          <ul>
-            {projects.map((p) => (
-              <li key={p.id} style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => router.push(`/app/project/${p.id}`)}
-                >
-                  {p.name}
-                </button>{' '}
-                — {p.niche} (etapa {p.currentStage}/12, {p.status})
-              </li>
-            ))}
-          </ul>
+        <section className="glass rounded-2xl p-6">
+          <h2 className="mb-4 text-lg font-medium">Novo projeto</h2>
+          <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm text-muted">
+              Nome
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                className="field mt-1"
+              />
+            </label>
+            <label className="block text-sm text-muted">
+              Nicho
+              <input
+                type="text"
+                value={niche}
+                onChange={(e) => setNiche(e.target.value)}
+                required
+                className="field mt-1"
+              />
+            </label>
+            <div className="sm:col-span-2">
+              <button type="submit" disabled={creating} className="btn-primary">
+                {creating ? 'Criando...' : 'Criar projeto'}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        {error && (
+          <p className="rounded-xl bg-danger/10 px-4 py-3 text-sm text-danger">
+            {error}
+          </p>
         )}
-      </section>
-    </main>
+
+        <section>
+          <h2 className="mb-3 text-lg font-medium">Projetos existentes</h2>
+          {projects.length === 0 ? (
+            <p className="text-muted">Nenhum projeto ainda.</p>
+          ) : (
+            <ul className="grid gap-3">
+              {projects.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/app/project/${p.id}`)}
+                    className="glass w-full rounded-2xl p-4 text-left transition hover:border-primary/40"
+                  >
+                    <span className="block font-medium">{p.name}</span>
+                    <span className="mt-1 block text-sm text-muted">
+                      {p.niche} · etapa {p.currentStage}/12 · {p.status}
+                    </span>
+                    <span className="mt-3 block h-1.5 w-full overflow-hidden rounded-full bg-surface">
+                      <span
+                        className="block h-full rounded-full bg-primary"
+                        style={{ width: `${Math.round((p.currentStage / 12) * 100)}%` }}
+                      />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+    </div>
   );
 }
