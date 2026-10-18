@@ -4,4 +4,10 @@
  * @module lib/storage
  */
 
-export { uploadFile, deleteFile, getSignedUrl, type UploadResult } from './s3-client';
+export {
+  uploadFile,
+  deleteFile,
+  getSignedUrl,
+  getVisibility,
+  type UploadResult,
+} from './s3-client';

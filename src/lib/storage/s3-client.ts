@@ -55,6 +55,31 @@ export interface UploadResult {
   url: string;
   /** Nome do bucket. */
   bucket: string;
+  /**
+   * Visibilidade do objeto conforme regra de acesso por tipo (Etapa 8).
+   * 'public'  → imagens (JPEG/PNG/GIF/WebP), gravadas com ACL public-read.
+   * 'private' → documentos (PDF/DOC/DOCX/TXT/SVG), acessíveis via URL assinada.
+   */
+  visibility: 'public' | 'private';
+}
+
+/**
+ * Determina a visibilidade de um arquivo a partir do seu MIME type.
+ *
+ * Regra de acesso por tipo (Doc 08: "A plataforma deve manter todos os
+ * arquivos organizados por categorias."):
+ *   - JPEG, PNG, GIF, WebP → 'public'  (URL pública, ACL public-read)
+ *   - PDF, DOC, DOCX, TXT, SVG → 'private' (URL assinada temporária)
+ *
+ * SVG é tratado como privado por ser um formato capaz de carregar scripts;
+ * servi-lo via URL assinada evita exposição pública direta.
+ *
+ * @param mimeType - MIME type (preferencialmente o tipo REAL detectado).
+ * @returns 'public' para imagens de bitmap suportadas; 'private' caso contrário.
+ */
+export function getVisibility(mimeType: string): 'public' | 'private' {
+  const PUBLIC_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  return PUBLIC_TYPES.includes(mimeType) ? 'public' : 'private';
 }
 
 /**
@@ -63,24 +88,30 @@ export interface UploadResult {
  * @param file - Buffer contendo os dados do arquivo.
  * @param key - Chave (caminho) do objeto no bucket (ex: "projects/abc123/image.png").
  * @param contentType - MIME type do arquivo (ex: "image/png").
- * @returns Metadados do arquivo enviado.
+ * @param acl - ACL opcional. Quando 'public-read', o objeto é gravado com
+ *   acesso público de leitura (usado para imagens). Se omitido, o objeto
+ *   permanece privado e deve ser acessado via URL assinada.
+ * @returns Metadados do arquivo enviado, incluindo a visibilidade resultante.
  *
  * @throws Se as credenciais AWS estiverem inválidas ou o bucket não existir.
  *
  * @example
- * const result = await uploadFile(buffer, "users/user123/avatar.jpg", "image/jpeg");
+ * const result = await uploadFile(buffer, "users/user123/avatar.jpg", "image/jpeg", "public-read");
  * console.log("Arquivo enviado:", result.url);
  */
 export async function uploadFile(
   file: Buffer,
   key: string,
-  contentType: string
+  contentType: string,
+  acl?: 'public-read'
 ): Promise<UploadResult> {
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
     Body: file,
     ContentType: contentType,
+    // Só aplica ACL quando explicitamente solicitado (imagens públicas).
+    ...(acl ? { ACL: acl } : {}),
   });
 
   await s3Client.send(command);
@@ -92,6 +123,7 @@ export async function uploadFile(
     key,
     url,
     bucket: BUCKET,
+    visibility: acl === 'public-read' ? 'public' : 'private',
   };
 }
 
