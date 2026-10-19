@@ -42,6 +42,20 @@ interface StageResponse {
   allStages: StageMeta[];
 }
 
+/** Arquivo anexado — formato devolvido por GET /api/projects/:id/files (sem key interna). */
+interface ProjectFile {
+  name: string;
+  type: string;
+  size: number;
+  visibility: 'public' | 'private';
+  uploadedAt: string;
+  url: string;
+}
+
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/svg+xml';
+const DOC_ACCEPT =
+  '.pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
+
 interface ChatMessage {
   role: string;
   content: string;
@@ -94,6 +108,16 @@ export default function ProjectPage() {
   const [genContent, setGenContent] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
 
+  // ── Anexos (Etapa 8) ─────────────────────────────────────────────────────
+  // Doc 02: "Botão "+" Ao lado da caixa de mensagem existe apenas um botão.
+  // Esse botão expande pequenas opções." Implementadas apenas as opções com
+  // backend: "Adicionar imagem" e "Adicionar documento".
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
   const loadStage = useCallback(async () => {
     const res = await authFetch(`/api/projects/${projectId}/stage`);
     if (res.ok) {
@@ -122,6 +146,55 @@ export default function ProjectPage() {
     setMessages(all);
   }, [projectId]);
 
+  const loadFiles = useCallback(async () => {
+    const res = await authFetch(`/api/projects/${projectId}/files`);
+    if (res.ok) {
+      const data = await res.json();
+      setFiles(Array.isArray(data.files) ? (data.files as ProjectFile[]) : []);
+    }
+  }, [projectId]);
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target;
+    const file = input.files?.[0];
+    setAttachMenuOpen(false);
+    if (!file) return;
+    setError(null);
+    setUploading(true);
+    try {
+      let token = getAccessToken();
+      if (!token) {
+        const ok = await refresh();
+        token = ok ? getAccessToken() : null;
+      }
+      if (!token) {
+        router.replace('/login');
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('projectId', projectId);
+      // Sem Content-Type manual: o navegador define o boundary do multipart.
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        body: form,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? 'Não foi possível enviar o arquivo.');
+        return;
+      }
+      await loadFiles();
+    } catch {
+      setError('Não foi possível enviar o arquivo.');
+    } finally {
+      setUploading(false);
+      input.value = '';
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const ok = await refresh();
@@ -129,10 +202,10 @@ export default function ProjectPage() {
         router.replace('/login');
         return;
       }
-      await Promise.all([loadProject(), loadStage()]);
+      await Promise.all([loadProject(), loadStage(), loadFiles()]);
       setReady(true);
     })();
-  }, [router, loadProject, loadStage]);
+  }, [router, loadProject, loadStage, loadFiles]);
 
   async function handleStageAction(action: 'advance' | 'back') {
     setError(null);
@@ -409,6 +482,51 @@ export default function ProjectPage() {
           )}
 
           <form onSubmit={handleSend} className="flex gap-2 border-t border-border p-4">
+            {/* Botão "+" — Doc 02: "Ao lado da caixa de mensagem existe apenas um botão." */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setAttachMenuOpen((v) => !v)}
+                disabled={uploading}
+                aria-label="Adicionar anexo"
+                aria-expanded={attachMenuOpen}
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-border text-lg font-semibold hover:bg-primary-soft disabled:opacity-50"
+              >
+                {uploading ? '…' : '+'}
+              </button>
+              {attachMenuOpen && (
+                <div className="glass absolute bottom-12 left-0 z-10 w-48 rounded-xl p-1 text-sm shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="block w-full rounded-lg px-3 py-2 text-left hover:bg-primary-soft"
+                  >
+                    Adicionar imagem
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => docInputRef.current?.click()}
+                    className="block w-full rounded-lg px-3 py-2 text-left hover:bg-primary-soft"
+                  >
+                    Adicionar documento
+                  </button>
+                </div>
+              )}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept={IMAGE_ACCEPT}
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+              <input
+                ref={docInputRef}
+                type="file"
+                accept={DOC_ACCEPT}
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+            </div>
             <input
               type="text"
               value={input}
@@ -429,6 +547,29 @@ export default function ProjectPage() {
 
         {/* Painel lateral — Doc 02: "Esse painel mostra o negócio nascendo." */}
         <aside className="space-y-6">
+          {/* Anexos do projeto (Etapa 8) */}
+          <section className="glass rounded-2xl p-5">
+            <h2 className="mb-3 text-sm font-medium text-muted">Anexos</h2>
+            {files.length === 0 ? (
+              <p className="text-sm text-muted">Nenhum arquivo anexado.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {files.map((f) => (
+                  <li key={`${f.uploadedAt}-${f.name}`} className="truncate">
+                    <a
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:opacity-80"
+                    >
+                      {f.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           {/* Barra de progresso por etapas — "Ela deve mostrar etapas." */}
           <section className="glass rounded-2xl p-5">
             <h2 className="mb-3 text-sm font-medium text-muted">Progresso</h2>

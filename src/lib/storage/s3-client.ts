@@ -48,9 +48,9 @@ const s3Client = new S3Client({
 /**
  * Constrói a URL pública (não assinada) de um objeto no S3.
  *
- * Só é acessível de fato se o bucket permitir leitura pública para a chave
- * (seja por ACL public-read no objeto, seja por política de bucket em um prefixo
- * público). Para objetos privados, use `getSignedUrl`.
+ * Só é acessível de fato para chaves sob o prefixo `public/`, que a política
+ * de bucket libera para leitura (s3:GetObject, sem listagem). ACLs por objeto
+ * não são usadas. Para objetos privados, use `getSignedUrl`.
  *
  * @param key - Chave (caminho) do objeto no bucket.
  * @returns URL pública base do objeto.
@@ -71,8 +71,10 @@ export interface UploadResult {
   bucket: string;
   /**
    * Visibilidade do objeto conforme regra de acesso por tipo (Etapa 8).
-   * 'public'  → imagens (JPEG/PNG/GIF/WebP), gravadas com ACL public-read.
-   * 'private' → documentos (PDF/DOC/DOCX/TXT/SVG), acessíveis via URL assinada.
+   * 'public'  → imagens (JPEG/PNG/GIF/WebP), gravadas sob o prefixo `public/`
+   *             (leitura liberada pela política de bucket; sem ACL por objeto).
+   * 'private' → documentos (PDF/DOC/DOCX/TXT/SVG), sob `private/`, acessíveis
+   *             apenas via URL assinada.
    */
   visibility: 'public' | 'private';
 }
@@ -82,7 +84,7 @@ export interface UploadResult {
  *
  * Regra de acesso por tipo (Doc 08: "A plataforma deve manter todos os
  * arquivos organizados por categorias."):
- *   - JPEG, PNG, GIF, WebP → 'public'  (URL pública, ACL public-read)
+ *   - JPEG, PNG, GIF, WebP → 'public'  (prefixo public/, política de bucket)
  *   - PDF, DOC, DOCX, TXT, SVG → 'private' (URL assinada temporária)
  *
  * SVG é tratado como privado por ser um formato capaz de carregar scripts;
@@ -99,45 +101,36 @@ export function getVisibility(mimeType: string): 'public' | 'private' {
 /**
  * Faz upload de um arquivo para o S3.
  *
+ * Nenhuma ACL é aplicada ao objeto. A visibilidade é derivada do MIME type via
+ * `getVisibility` e o acesso público depende exclusivamente de a chave estar
+ * sob o prefixo `public/` (liberado pela política de bucket).
+ *
  * @param file - Buffer contendo os dados do arquivo.
- * @param key - Chave (caminho) do objeto no bucket (ex: "projects/abc123/image.png").
- * @param contentType - MIME type do arquivo (ex: "image/png").
- * @param acl - ACL opcional. Quando 'public-read', o objeto é gravado com
- *   acesso público de leitura (usado para imagens). Se omitido, o objeto
- *   permanece privado e deve ser acessado via URL assinada.
- * @returns Metadados do arquivo enviado, incluindo a visibilidade resultante.
+ * @param key - Chave (caminho) do objeto no bucket.
+ * @param contentType - MIME type REAL do arquivo (ex: "image/png").
+ * @returns Metadados do arquivo enviado, incluindo a visibilidade.
  *
  * @throws Se as credenciais AWS estiverem inválidas ou o bucket não existir.
- *
- * @example
- * const result = await uploadFile(buffer, "users/user123/avatar.jpg", "image/jpeg", "public-read");
- * console.log("Arquivo enviado:", result.url);
  */
 export async function uploadFile(
   file: Buffer,
   key: string,
-  contentType: string,
-  acl?: 'public-read'
+  contentType: string
 ): Promise<UploadResult> {
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
     Body: file,
     ContentType: contentType,
-    // Só aplica ACL quando explicitamente solicitado (imagens públicas).
-    ...(acl ? { ACL: acl } : {}),
   });
 
   await s3Client.send(command);
 
-  // URL pública (assumindo bucket público; se privado, usar getSignedUrl).
-  const url = getPublicUrl(key);
-
   return {
     key,
-    url,
+    url: getPublicUrl(key),
     bucket: BUCKET,
-    visibility: acl === 'public-read' ? 'public' : 'private',
+    visibility: getVisibility(contentType),
   };
 }
 

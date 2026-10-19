@@ -71,8 +71,10 @@ export async function GET(
             upload.visibility === 'private'
               ? await getSignedUrl(upload.key, SIGNED_URL_TTL_SECONDS)
               : getPublicUrl(upload.key);
+          // A chave interna do S3 NÃO é devolvida ao cliente (Doc 08:
+          // "Nunca expor: ... Dados internos."). O cliente identifica cada
+          // arquivo por `uploadedAt` + `name`.
           return {
-            key: upload.key,
             name: upload.name,
             type: upload.type,
             size: upload.size,

@@ -3,7 +3,8 @@
  *
  * GET    /api/projects/:id  - detalhes do projeto (verifica ownership)
  * PATCH  /api/projects/:id  - atualiza projeto (name, status, current_stage, output_data)
- * DELETE /api/projects/:id  - deleta projeto (verifica ownership)
+ * DELETE /api/projects/:id  - deleta projeto (verifica ownership) e, em seguida,
+ *   apaga do S3 os arquivos referenciados em outputData.uploads (sem listar o bucket).
  *
  * @module api/projects/[id]
  */
@@ -11,7 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/modules/database';
 import { withAuth } from '@/lib/security';
-import { TOTAL_STAGES } from '@/modules/ai-engine';
+import { TOTAL_STAGES, readFlowState } from '@/modules/ai-engine';
+import { deleteFile } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -216,7 +218,7 @@ export async function DELETE(
     try {
       const existing = await prisma.project.findUnique({
         where: { id },
-        select: { userId: true },
+        select: { userId: true, outputData: true },
       });
 
       if (!existing) {
@@ -233,8 +235,25 @@ export async function DELETE(
         );
       }
 
-      // Hard delete (cascata remove conversas, feedbacks, history relacionados).
+      // 1) Ler as referências dos arquivos ANTES de excluir o projeto.
+      const keys = readFlowState(existing.outputData).uploads.map((u) => u.key);
+
+      // 2) Hard delete (cascata remove conversas, feedbacks, history relacionados).
       await prisma.project.delete({ where: { id } });
+
+      // 3) Apagar os arquivos do S3 pelas chaves guardadas. Não lista o bucket.
+      //    Falhas são registradas no servidor e NÃO bloqueiam a exclusão.
+      if (keys.length > 0) {
+        const results = await Promise.allSettled(keys.map((key) => deleteFile(key)));
+        results.forEach((r, i) => {
+          if (r.status === 'rejected') {
+            console.error(
+              `[projects:delete] Falha ao apagar arquivo do S3 (projeto ${id}, chave ${keys[i]}):`,
+              r.reason
+            );
+          }
+        });
+      }
 
       return NextResponse.json({ message: 'Projeto removido com sucesso' });
     } catch (error) {

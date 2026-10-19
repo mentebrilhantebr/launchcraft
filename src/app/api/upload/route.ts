@@ -5,16 +5,26 @@
  * Body: FormData com campo "file" (multipart/form-data) e, opcionalmente,
  *       campo "projectId" (string).
  * Auth: obrigatório (withAuth)
- * Resposta: { url, key, size, type, visibility, projectId? }
+ * Resposta: { url, name, size, type, visibility, uploadedAt, projectId? }
+ *   (a chave interna do S3 NÃO é devolvida — Doc 08: "Nunca expor: ... Dados internos.")
  *
  * Validações:
  * - Tipo de arquivo permitido (MIME type) — validado pelo CONTEÚDO real (magic bytes).
  * - Tamanho máximo (MAX_FILE_SIZE_MB)
  * - Posse do projeto (quando projectId informado)
  *
- * Regra de acesso por tipo:
- * - Imagens (JPEG/PNG/GIF/WebP) → upload público (ACL public-read), URL pública.
- * - Documentos (PDF/DOC/DOCX/TXT/SVG) → privado, URL assinada temporária.
+ * Regra de acesso por tipo (sem ACL por objeto):
+ * - Imagens (JPEG/PNG/GIF/WebP) → prefixo `public/images/`, lido via política de
+ *   bucket que libera apenas s3:GetObject em `public/*` (sem listagem).
+ * - Documentos (PDF/DOC/DOCX/TXT) e SVG → prefixo `private/documents/`, acesso
+ *   somente por URL assinada temporária.
+ *
+ * Estrutura das chaves (organização por categoria):
+ *   public/images/<userId>/<projectId | sem-projeto>/<timestamp>-<uuid>.<ext>
+ *   private/documents/<userId>/<projectId | sem-projeto>/<timestamp>-<uuid>.<ext>
+ * INFERÊNCIA: o Doc 08 exige organização "por categorias", mas não define
+ * quais são as categorias de arquivo. "images" e "documents" foram adotadas
+ * conforme aprovação do usuário. SVG fica em documents/ por ser privado.
  *
  * Prompt de Construção, item 8:
  *   "Armazenamento de arquivos (S3, upload e associação a projetos)"
@@ -286,21 +296,15 @@ export async function POST(request: NextRequest) {
       // ITEM 1: visibilidade pela regra de acesso por tipo.
       const visibility = getVisibility(effectiveType);
 
-      // Gerar chave única. Com projectId: users/<userId>/projects/<projectId>/...
+      // Gerar chave única com prefixo de acesso + categoria (ver cabeçalho).
       const timestamp = Date.now();
       const uuid = randomUUID();
       const ext = getExtensionFromMimeType(effectiveType);
-      const key = projectId
-        ? `users/${userId}/projects/${projectId}/${timestamp}-${uuid}.${ext}`
-        : `users/${userId}/${timestamp}-${uuid}.${ext}`;
+      const prefix = visibility === 'public' ? 'public/images' : 'private/documents';
+      const key = `${prefix}/${userId}/${projectId ?? 'sem-projeto'}/${timestamp}-${uuid}.${ext}`;
 
-      // Upload: imagens públicas recebem ACL public-read; documentos ficam privados.
-      const result = await uploadFile(
-        buffer,
-        key,
-        effectiveType,
-        visibility === 'public' ? 'public-read' : undefined
-      );
+      // Upload sem ACL: o acesso público vem só do prefixo public/ (política de bucket).
+      const result = await uploadFile(buffer, key, effectiveType);
 
       // Documentos privados → gerar URL assinada temporária na rota.
       const url =
@@ -315,6 +319,7 @@ export async function POST(request: NextRequest) {
       // de forma atômica por linha, então dois uploads simultâneos no mesmo
       // projeto NUNCA se sobrescrevem. O COALESCE cobre output_data nulo ou sem
       // a chave `uploads`; o WHERE com user_id reforça o isolamento por usuário.
+      const uploadedAt = new Date().toISOString();
       if (projectId) {
         const ref: UploadReference = {
           key: result.key,
@@ -322,7 +327,7 @@ export async function POST(request: NextRequest) {
           type: effectiveType,
           size: file.size,
           visibility,
-          uploadedAt: new Date().toISOString(),
+          uploadedAt,
         };
         await prisma.$executeRaw`
           UPDATE projects
@@ -340,10 +345,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           url,
-          key: result.key,
+          name: file.name,
           size: file.size,
           type: effectiveType,
           visibility,
+          uploadedAt,
           ...(projectId ? { projectId } : {}),
         },
         { status: 200 }
