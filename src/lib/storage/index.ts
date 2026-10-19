@@ -8,6 +8,7 @@ export {
   uploadFile,
   deleteFile,
   getSignedUrl,
+  getPublicUrl,
   getVisibility,
   type UploadResult,
 } from './s3-client';

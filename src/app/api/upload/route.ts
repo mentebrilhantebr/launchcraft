@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { withAuth } from '@/lib/security';
 import { uploadFile, getSignedUrl, getVisibility } from '@/lib/storage';
 import { prisma } from '@/modules/database';
+import type { UploadReference } from '@/modules/ai-engine';
 
 export const runtime = 'nodejs';
 
@@ -306,6 +307,35 @@ export async function POST(request: NextRequest) {
         visibility === 'public'
           ? result.url
           : await getSignedUrl(result.key, SIGNED_URL_TTL_SECONDS);
+
+      // ITEM 1 + ITEM 4: quando associado a um projeto, persistir a REFERÊNCIA
+      // (só dados estáveis — sem URL) dentro de Project.outputData, no mesmo bag
+      // das gerações (Opção A). A gravação é um append ATÔMICO em JSONB numa
+      // única instrução SQL: `|| [ref]` concatena o elemento ao array existente
+      // de forma atômica por linha, então dois uploads simultâneos no mesmo
+      // projeto NUNCA se sobrescrevem. O COALESCE cobre output_data nulo ou sem
+      // a chave `uploads`; o WHERE com user_id reforça o isolamento por usuário.
+      if (projectId) {
+        const ref: UploadReference = {
+          key: result.key,
+          name: file.name,
+          type: effectiveType,
+          size: file.size,
+          visibility,
+          uploadedAt: new Date().toISOString(),
+        };
+        await prisma.$executeRaw`
+          UPDATE projects
+          SET output_data = jsonb_set(
+                COALESCE(output_data, '{}'::jsonb),
+                '{uploads}',
+                COALESCE(output_data -> 'uploads', '[]'::jsonb) || ${JSON.stringify([ref])}::jsonb,
+                true
+              ),
+              updated_at = now()
+          WHERE id = ${projectId}::uuid AND user_id = ${userId}::uuid
+        `;
+      }
 
       return NextResponse.json(
         {

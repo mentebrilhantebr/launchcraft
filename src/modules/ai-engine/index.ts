@@ -54,11 +54,14 @@ export {
   mergeDecisions,
   recordStageEntry,
   appendGeneration,
+  appendUpload,
+  isUploadReference,
   type StageMeta,
   type ProjectDecisions,
   type ProjectFlowState,
   type StageHistoryEntry,
   type GenerationResult,
+  type UploadReference,
 } from './flow';
 
 // Context

@@ -52,6 +52,36 @@ export interface GenerationResult {
 }
 
 /**
+ * A reference to a file uploaded by the user and associated to the project
+ * (Etapa 8, Opção A — "upload e associação a projetos").
+ *
+ * Doc 08: "A plataforma deve manter todos os arquivos organizados por
+ * categorias." e "Todo projeto deve ser salvo automaticamente. Caso o usuário
+ * saia da plataforma, ao retornar deverá encontrar seu projeto exatamente onde
+ * parou." Por isso a referência vive aqui, dentro de Project.outputData, junto
+ * das gerações — sobrevive à navegação entre etapas.
+ *
+ * IMPORTANTE: guardamos APENAS dados estáveis. NUNCA guardamos a URL assinada,
+ * pois ela expira (~1h); a URL é gerada na hora da consulta (ver a rota
+ * GET /api/projects/:id/files). Doc 08 (Segurança): "Nunca expor: Tokens.
+ * Chaves. Dados internos. ... Informações privadas."
+ */
+export interface UploadReference {
+  /** Chave (caminho) do objeto no bucket S3. */
+  key: string;
+  /** Nome original do arquivo enviado pelo usuário. */
+  name: string;
+  /** MIME type REAL detectado pelo conteúdo (magic bytes), não o do browser. */
+  type: string;
+  /** Tamanho em bytes. */
+  size: number;
+  /** Regra de acesso resolvida pelo tipo: imagens 'public', documentos 'private'. */
+  visibility: 'public' | 'private';
+  /** ISO timestamp do upload. */
+  uploadedAt: string;
+}
+
+/**
  * The full flow state persisted in Project.outputData.
  */
 export interface ProjectFlowState {
@@ -59,13 +89,31 @@ export interface ProjectFlowState {
   stageHistory: StageHistoryEntry[];
   /** Content produced by the generation queue (Etapa 6). */
   generations: GenerationResult[];
+  /** Files uploaded by the user and associated to the project (Etapa 8). */
+  uploads: UploadReference[];
 }
 
 /**
  * Returns an empty flow state.
  */
 export function emptyFlowState(): ProjectFlowState {
-  return { decisions: {}, stageHistory: [], generations: [] };
+  return { decisions: {}, stageHistory: [], generations: [], uploads: [] };
+}
+
+/**
+ * Type guard for a single persisted UploadReference coming from JSONB.
+ */
+export function isUploadReference(value: unknown): value is UploadReference {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.key === 'string' &&
+    typeof record.name === 'string' &&
+    typeof record.type === 'string' &&
+    typeof record.size === 'number' &&
+    (record.visibility === 'public' || record.visibility === 'private') &&
+    typeof record.uploadedAt === 'string'
+  );
 }
 
 /**
@@ -114,7 +162,11 @@ export function readFlowState(outputData: unknown): ProjectFlowState {
     ? (data.generations as unknown[]).filter(isGenerationResult)
     : [];
 
-  return { decisions, stageHistory, generations };
+  const uploads = Array.isArray(data.uploads)
+    ? (data.uploads as unknown[]).filter(isUploadReference)
+    : [];
+
+  return { decisions, stageHistory, generations, uploads };
 }
 
 /**
@@ -172,5 +224,27 @@ export function appendGeneration(
   return {
     ...state,
     generations: [...state.generations, result],
+  };
+}
+
+/**
+ * Appends an upload reference to the flow state, returning a NEW state (does not
+ * mutate the input). Mesmo padrão de `appendGeneration`: o spread `...state`
+ * preserva decisions/stageHistory/generations, de modo que gravar o estado de
+ * volta (ex.: na rota de etapas) nunca apaga os uploads — e vice-versa.
+ *
+ * ATENÇÃO sobre concorrência: este helper é um read-modify-write em memória.
+ * Para o caminho de upload da API, a gravação é feita por um append ATÔMICO em
+ * JSONB no banco (ver src/app/api/upload/route.ts), que é seguro contra dois
+ * uploads simultâneos no mesmo projeto. Este helper existe para consistência de
+ * tipos e usos não concorrentes.
+ */
+export function appendUpload(
+  state: ProjectFlowState,
+  ref: UploadReference
+): ProjectFlowState {
+  return {
+    ...state,
+    uploads: [...state.uploads, ref],
   };
 }

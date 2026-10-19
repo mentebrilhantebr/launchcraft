@@ -31,8 +31,11 @@ export {
   mergeDecisions,
   recordStageEntry,
   appendGeneration,
+  appendUpload,
+  isUploadReference,
   type ProjectDecisions,
   type ProjectFlowState,
   type StageHistoryEntry,
   type GenerationResult,
+  type UploadReference,
 } from './project-state';

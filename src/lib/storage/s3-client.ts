@@ -46,6 +46,20 @@ const s3Client = new S3Client({
 });
 
 /**
+ * Constrói a URL pública (não assinada) de um objeto no S3.
+ *
+ * Só é acessível de fato se o bucket permitir leitura pública para a chave
+ * (seja por ACL public-read no objeto, seja por política de bucket em um prefixo
+ * público). Para objetos privados, use `getSignedUrl`.
+ *
+ * @param key - Chave (caminho) do objeto no bucket.
+ * @returns URL pública base do objeto.
+ */
+export function getPublicUrl(key: string): string {
+  return `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
+}
+
+/**
  * Resultado de um upload bem-sucedido.
  */
 export interface UploadResult {
@@ -117,7 +131,7 @@ export async function uploadFile(
   await s3Client.send(command);
 
   // URL pública (assumindo bucket público; se privado, usar getSignedUrl).
-  const url = `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
+  const url = getPublicUrl(key);
 
   return {
     key,
