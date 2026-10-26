@@ -22,7 +22,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/modules/database';
 import { withAuth } from '@/lib/security';
 import { readFlowState } from '@/modules/ai-engine';
-import { getSignedUrl, getPublicUrl } from '@/lib/storage';
+import { getSignedUrl, getPublicUrl, isKeyOwnedByUserProject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -64,9 +64,23 @@ export async function GET(
 
       const { uploads } = readFlowState(project.outputData);
 
+      // VALIDAÇÃO DE POSSE (aprovada): antes de gerar qualquer URL (assinada ou
+      // pública), confirmamos que a chave pertence ao prefixo do próprio
+      // usuário/projeto. Uma chave fora do prefixo é rejeitada e registrada no
+      // servidor, nunca exposta (poderia apontar para arquivo de outro usuário).
+      const ownedUploads = uploads.filter((upload) => {
+        const ok = isKeyOwnedByUserProject(upload.key, userId!, id);
+        if (!ok) {
+          console.error(
+            `[projects:files] Chave fora do prefixo do usuário/projeto, ignorada (projeto ${id}, chave ${upload.key}).`
+          );
+        }
+        return ok;
+      });
+
       // Monta a URL de cada arquivo na hora da consulta.
       const files = await Promise.all(
-        uploads.map(async (upload) => {
+        ownedUploads.map(async (upload) => {
           const url =
             upload.visibility === 'private'
               ? await getSignedUrl(upload.key, SIGNED_URL_TTL_SECONDS)

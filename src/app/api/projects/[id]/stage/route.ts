@@ -23,11 +23,9 @@ import {
   canGoBack,
   getStageMeta,
   isSequentialAdvance,
-  mergeDecisions,
   nextStage,
   previousStage,
   readFlowState,
-  recordStageEntry,
   type ProjectDecisions,
   type ProjectFlowState,
 } from '@/modules/ai-engine';
@@ -196,46 +194,74 @@ export async function POST(
         toStage = prev;
       }
 
-      // Atualiza o estado do fluxo (decisões + histórico de etapas).
-      let flowState = readFlowState(project.outputData);
-      flowState = mergeDecisions(flowState, decisions);
-      if (toStage !== fromStage) {
-        flowState = recordStageEntry(flowState, toStage);
-      }
+      // CONDIÇÃO DE CORRIDA (correção aprovada): nunca regravamos o outputData
+      // inteiro. Gravamos APENAS a própria subchave com jsonb_set parametrizado,
+      // de modo que um upload concorrente (que faz append em `uploads`) jamais é
+      // sobrescrito. `current_stage` continua em atualização normal de coluna.
+      // Sem trava de linha (SELECT ... FOR UPDATE), por decisão do usuário.
+      const stageChanged = toStage !== fromStage;
+      const hasDecisions =
+        decisions !== undefined && Object.keys(decisions).length > 0;
 
-      const updated = await prisma.$transaction(
-        async (tx: Prisma.TransactionClient) => {
-          const result = await tx.project.update({
-            where: { id },
+      const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // 1) Mescla decisions na subchave {decisions} (|| entre objetos jsonb).
+        if (hasDecisions) {
+          await tx.$executeRaw`
+            UPDATE projects
+            SET output_data = jsonb_set(
+                  COALESCE(output_data, '{}'::jsonb),
+                  '{decisions}',
+                  COALESCE(output_data -> 'decisions', '{}'::jsonb) || ${JSON.stringify(
+                    decisions
+                  )}::jsonb,
+                  true
+                ),
+                updated_at = now()
+            WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
+          `;
+        }
+
+        // 2) Mudança de etapa: atualiza current_stage + append em {stageHistory}.
+        if (stageChanged) {
+          const entry = { stage: toStage, enteredAt: new Date().toISOString() };
+          await tx.$executeRaw`
+            UPDATE projects
+            SET current_stage = ${toStage},
+                output_data = jsonb_set(
+                  COALESCE(output_data, '{}'::jsonb),
+                  '{stageHistory}',
+                  COALESCE(output_data -> 'stageHistory', '[]'::jsonb) || ${JSON.stringify(
+                    [entry]
+                  )}::jsonb,
+                  true
+                ),
+                updated_at = now()
+            WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
+          `;
+
+          await tx.history.create({
             data: {
-              currentStage: toStage,
-              outputData: flowState as unknown as Prisma.InputJsonValue,
-            },
-            select: {
-              id: true,
-              currentStage: true,
-              outputData: true,
+              userId: userId!,
+              projectId: id,
+              action:
+                action === 'advance' ? 'stage_advanced' : 'stage_reverted',
+              metadata: { fromStage, toStage },
             },
           });
-
-          if (toStage !== fromStage) {
-            await tx.history.create({
-              data: {
-                userId: userId!,
-                projectId: id,
-                action:
-                  action === 'advance' ? 'stage_advanced' : 'stage_reverted',
-                metadata: { fromStage, toStage },
-              },
-            });
-          }
-
-          return result;
         }
-      );
+
+        // 3) Lê o estado final já consolidado para a resposta.
+        return tx.project.findUnique({
+          where: { id },
+          select: { currentStage: true, outputData: true },
+        });
+      });
 
       return NextResponse.json(
-        buildStatePayload(updated.currentStage, readFlowState(updated.outputData))
+        buildStatePayload(
+          updated?.currentStage ?? toStage,
+          readFlowState(updated?.outputData)
+        )
       );
     } catch (error) {
       console.error('Erro ao atualizar etapa do projeto:', error);

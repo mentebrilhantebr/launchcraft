@@ -24,7 +24,6 @@ import type { Job, Worker } from 'bullmq';
 import { prisma } from '@/modules/database';
 import type { Prisma } from '@prisma/client';
 import {
-  appendGeneration,
   buildSystemPrompt,
   getDefaultGenerateConfig,
   getPrimaryProvider,
@@ -82,25 +81,32 @@ async function processAIGenerationJob(
   await job.updateProgress(80);
 
   // 4. Persist the generated content inside the project's flow state.
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { outputData: true },
-  });
-
-  const flowState = readFlowState(project?.outputData);
-  const nextState = appendGeneration(flowState, {
-    jobId: job.id,
+  //    CONDIÇÃO DE CORRIDA (correção aprovada): em vez de ler o outputData e
+  //    regravá-lo inteiro (o que apagaria um upload concorrente), gravamos
+  //    APENAS a subchave {generations} com append atômico via jsonb_set
+  //    parametrizado. O WHERE com user_id reforça o isolamento por usuário.
+  const generation = {
+    jobId: job.id ?? null,
     kind,
     stage,
     content,
     createdAt: new Date().toISOString(),
-  });
+  };
 
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.project.update({
-      where: { id: projectId },
-      data: { outputData: nextState as unknown as Prisma.InputJsonValue },
-    });
+    await tx.$executeRaw`
+      UPDATE projects
+      SET output_data = jsonb_set(
+            COALESCE(output_data, '{}'::jsonb),
+            '{generations}',
+            COALESCE(output_data -> 'generations', '[]'::jsonb) || ${JSON.stringify(
+              [generation]
+            )}::jsonb,
+            true
+          ),
+          updated_at = now()
+      WHERE id = ${projectId}::uuid AND user_id = ${userId}::uuid
+    `;
 
     // 5. Log for the admin panel (Doc 08: logs são exclusivos do admin).
     await tx.history.create({

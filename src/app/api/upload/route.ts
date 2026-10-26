@@ -2,10 +2,10 @@
  * API Route: Upload de arquivos para S3 (Etapa 8)
  *
  * POST /api/upload
- * Body: FormData com campo "file" (multipart/form-data) e, opcionalmente,
- *       campo "projectId" (string).
+ * Body: FormData com campo "file" (multipart/form-data) e campo "projectId"
+ *       (string) — OBRIGATÓRIO (o único ponto de envio é a tela do projeto).
  * Auth: obrigatório (withAuth)
- * Resposta: { url, name, size, type, visibility, uploadedAt, projectId? }
+ * Resposta: { url, name, size, type, visibility, uploadedAt, projectId }
  *   (a chave interna do S3 NÃO é devolvida — Doc 08: "Nunca expor: ... Dados internos.")
  *
  * Validações:
@@ -20,8 +20,8 @@
  *   somente por URL assinada temporária.
  *
  * Estrutura das chaves (organização por categoria):
- *   public/images/<userId>/<projectId | sem-projeto>/<timestamp>-<uuid>.<ext>
- *   private/documents/<userId>/<projectId | sem-projeto>/<timestamp>-<uuid>.<ext>
+ *   public/images/<userId>/<projectId>/<timestamp>-<uuid>.<ext>
+ *   private/documents/<userId>/<projectId>/<timestamp>-<uuid>.<ext>
  * INFERÊNCIA: o Doc 08 exige organização "por categorias", mas não define
  * quais são as categorias de arquivo. "images" e "documents" foram adotadas
  * conforme aprovação do usuário. SVG fica em documents/ por ser privado.
@@ -228,21 +228,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ITEM 4: projectId opcional — se vier, validar posse pelo usuário logado.
+    // ITEM 4: projectId OBRIGATÓRIO — o único ponto de envio é a tela do projeto.
+    // Isso elimina uploads "sem-projeto" e garante que toda chave fica sob o
+    // prefixo do usuário/projeto, permitindo validar posse na leitura/exclusão.
     const projectIdRaw = formData.get('projectId');
-    let projectId: string | null = null;
-    if (typeof projectIdRaw === 'string' && projectIdRaw.trim().length > 0) {
-      projectId = projectIdRaw.trim();
-      const project = await prisma.project.findFirst({
-        where: { id: projectId, userId },
-        select: { id: true },
-      });
-      if (!project) {
-        return NextResponse.json(
-          { error: 'Projeto não encontrado ou sem permissão.' },
-          { status: 403 }
-        );
-      }
+    if (typeof projectIdRaw !== 'string' || projectIdRaw.trim().length === 0) {
+      return NextResponse.json(
+        { error: "Campo 'projectId' é obrigatório." },
+        { status: 400 }
+      );
+    }
+    const projectId = projectIdRaw.trim();
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, userId },
+      select: { id: true },
+    });
+    if (!project) {
+      return NextResponse.json(
+        { error: 'Projeto não encontrado ou sem permissão.' },
+        { status: 403 }
+      );
     }
 
     // Validar tamanho (antes de ler o buffer completo para o S3).
@@ -301,7 +306,7 @@ export async function POST(request: NextRequest) {
       const uuid = randomUUID();
       const ext = getExtensionFromMimeType(effectiveType);
       const prefix = visibility === 'public' ? 'public/images' : 'private/documents';
-      const key = `${prefix}/${userId}/${projectId ?? 'sem-projeto'}/${timestamp}-${uuid}.${ext}`;
+      const key = `${prefix}/${userId}/${projectId}/${timestamp}-${uuid}.${ext}`;
 
       // Upload sem ACL: o acesso público vem só do prefixo public/ (política de bucket).
       const result = await uploadFile(buffer, key, effectiveType);
@@ -320,27 +325,25 @@ export async function POST(request: NextRequest) {
       // projeto NUNCA se sobrescrevem. O COALESCE cobre output_data nulo ou sem
       // a chave `uploads`; o WHERE com user_id reforça o isolamento por usuário.
       const uploadedAt = new Date().toISOString();
-      if (projectId) {
-        const ref: UploadReference = {
-          key: result.key,
-          name: file.name,
-          type: effectiveType,
-          size: file.size,
-          visibility,
-          uploadedAt,
-        };
-        await prisma.$executeRaw`
-          UPDATE projects
-          SET output_data = jsonb_set(
-                COALESCE(output_data, '{}'::jsonb),
-                '{uploads}',
-                COALESCE(output_data -> 'uploads', '[]'::jsonb) || ${JSON.stringify([ref])}::jsonb,
-                true
-              ),
-              updated_at = now()
-          WHERE id = ${projectId}::uuid AND user_id = ${userId}::uuid
-        `;
-      }
+      const ref: UploadReference = {
+        key: result.key,
+        name: file.name,
+        type: effectiveType,
+        size: file.size,
+        visibility,
+        uploadedAt,
+      };
+      await prisma.$executeRaw`
+        UPDATE projects
+        SET output_data = jsonb_set(
+              COALESCE(output_data, '{}'::jsonb),
+              '{uploads}',
+              COALESCE(output_data -> 'uploads', '[]'::jsonb) || ${JSON.stringify([ref])}::jsonb,
+              true
+            ),
+            updated_at = now()
+        WHERE id = ${projectId}::uuid AND user_id = ${userId}::uuid
+      `;
 
       return NextResponse.json(
         {
@@ -350,7 +353,7 @@ export async function POST(request: NextRequest) {
           type: effectiveType,
           visibility,
           uploadedAt,
-          ...(projectId ? { projectId } : {}),
+          projectId,
         },
         { status: 200 }
       );

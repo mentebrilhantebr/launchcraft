@@ -2,7 +2,9 @@
  * API Route: Projeto individual
  *
  * GET    /api/projects/:id  - detalhes do projeto (verifica ownership)
- * PATCH  /api/projects/:id  - atualiza projeto (name, status, current_stage, output_data)
+ * PATCH  /api/projects/:id  - atualiza projeto (name, status, current_stage)
+ *   outputData NÃO é aceito via PATCH (segurança: o cliente poderia injetar
+ *   chaves de arquivos de outros usuários nas referências).
  * DELETE /api/projects/:id  - deleta projeto (verifica ownership) e, em seguida,
  *   apaga do S3 os arquivos referenciados em outputData.uploads (sem listar o bucket).
  *
@@ -13,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/modules/database';
 import { withAuth } from '@/lib/security';
 import { TOTAL_STAGES, readFlowState } from '@/modules/ai-engine';
-import { deleteFile } from '@/lib/storage';
+import { deleteFile, isKeyOwnedByUserProject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -75,7 +77,7 @@ export async function GET(
 
 /**
  * PATCH /api/projects/:id
- * Body: { name?, status?, currentStage?, outputData? }
+ * Body: { name?, status?, currentStage? } — outputData é rejeitado por segurança.
  */
 export async function PATCH(
   request: NextRequest,
@@ -95,11 +97,10 @@ export async function PATCH(
       );
     }
 
-    const { name, status, currentStage, outputData } = (body ?? {}) as {
+    const { name, status, currentStage } = (body ?? {}) as {
       name?: string;
       status?: string;
       currentStage?: number;
-      outputData?: unknown;
     };
 
     // Ownership check.
@@ -128,7 +129,6 @@ export async function PATCH(
         name?: string;
         status?: ProjectStatusValue;
         currentStage?: number;
-        outputData?: object | null;
       } = {};
 
       if (name !== undefined) {
@@ -166,10 +166,10 @@ export async function PATCH(
         data.currentStage = currentStage;
       }
 
-      if (outputData !== undefined) {
-        data.outputData =
-          outputData === null ? null : (outputData as object);
-      }
+      // SEGURANÇA: outputData é intencionalmente IGNORADO aqui. As referências de
+      // arquivos (outputData.uploads) só são gravadas pelo servidor em /api/upload,
+      // com append atômico. Aceitar outputData do cliente permitiria injetar chaves
+      // de arquivos de OUTROS usuários nas referências.
 
       if (Object.keys(data).length === 0) {
         return NextResponse.json(
@@ -236,12 +236,27 @@ export async function DELETE(
       }
 
       // 1) Ler as referências dos arquivos ANTES de excluir o projeto.
-      const keys = readFlowState(existing.outputData).uploads.map((u) => u.key);
+      const allKeys = readFlowState(existing.outputData).uploads.map((u) => u.key);
+
+      // 1b) VALIDAÇÃO DE POSSE (aprovada): só apagamos chaves que pertencem ao
+      //     prefixo do próprio usuário/projeto. Uma chave fora do prefixo é
+      //     rejeitada e registrada no servidor — nunca apagada (poderia ser de
+      //     outro usuário, caso o outputData tivesse sido adulterado).
+      const keys: string[] = [];
+      for (const key of allKeys) {
+        if (isKeyOwnedByUserProject(key, userId!, id)) {
+          keys.push(key);
+        } else {
+          console.error(
+            `[projects:delete] Chave fora do prefixo do usuário/projeto, ignorada (projeto ${id}, chave ${key}).`
+          );
+        }
+      }
 
       // 2) Hard delete (cascata remove conversas, feedbacks, history relacionados).
       await prisma.project.delete({ where: { id } });
 
-      // 3) Apagar os arquivos do S3 pelas chaves guardadas. Não lista o bucket.
+      // 3) Apagar os arquivos do S3 pelas chaves validadas. Não lista o bucket.
       //    Falhas são registradas no servidor e NÃO bloqueiam a exclusão.
       if (keys.length > 0) {
         const results = await Promise.allSettled(keys.map((key) => deleteFile(key)));

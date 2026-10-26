@@ -9,6 +9,7 @@ export {
   deleteFile,
   getSignedUrl,
   getPublicUrl,
+  isKeyOwnedByUserProject,
   getVisibility,
   type UploadResult,
 } from './s3-client';

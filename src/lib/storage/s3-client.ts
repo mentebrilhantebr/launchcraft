@@ -60,6 +60,42 @@ export function getPublicUrl(key: string): string {
 }
 
 /**
+ * Prefixos de chave permitidos para um dado usuário/projeto (Etapa 8).
+ * Espelham o formato gerado em POST /api/upload:
+ *   public/images/<userId>/<projectId>/...
+ *   private/documents/<userId>/<projectId>/...
+ */
+function ownedKeyPrefixes(userId: string, projectId: string): string[] {
+  return [
+    `public/images/${userId}/${projectId}/`,
+    `private/documents/${userId}/${projectId}/`,
+  ];
+}
+
+/**
+ * Valida que uma chave de objeto S3 pertence ao prefixo do PRÓPRIO usuário e
+ * projeto antes de qualquer acesso (gerar URL assinada) ou exclusão.
+ *
+ * Defesa em profundidade: embora as chaves sejam sempre geradas no servidor, uma
+ * referência corrompida ou adulterada (ex.: outputData manipulado) não pode
+ * resultar em leitura/remoção de arquivo de outro usuário. Rejeita também chaves
+ * com "../" para evitar travessia de caminho.
+ *
+ * @returns true somente se a chave começa com um prefixo próprio e não contém "..".
+ */
+export function isKeyOwnedByUserProject(
+  key: string,
+  userId: string,
+  projectId: string
+): boolean {
+  if (!key || !userId || !projectId) return false;
+  if (key.includes('..')) return false;
+  return ownedKeyPrefixes(userId, projectId).some((prefix) =>
+    key.startsWith(prefix)
+  );
+}
+
+/**
  * Resultado de um upload bem-sucedido.
  */
 export interface UploadResult {
